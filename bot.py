@@ -1,0 +1,186 @@
+import discord
+from discord import app_commands
+import google.generativeai as genai
+import json
+import os
+import random
+from datetime import datetime
+import asyncio
+import pytz
+
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+genai.configure(api_key=GEMINI_API_KEY)
+model_flash = genai.GenerativeModel("gemini-1.5-flash")
+model_think = genai.GenerativeModel("gemini-2.0-flash-thinking-exp")
+
+intents = discord.Intents.default()
+client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
+
+BALANCE_FILE = "balance.json"
+CASINO_CHANNELS = ["казик", "казино", "лучшие-по-казику", "чемпионат-по-казику"]
+
+def load_balance():
+    if os.path.exists(BALANCE_FILE):
+        with open(BALANCE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_balance(data):
+    with open(BALANCE_FILE, "w") as f:
+        json.dump(data, f)
+
+def get_balance(user_id):
+    data = load_balance()
+    return data.get(str(user_id), 100)
+
+def set_balance(user_id, amount):
+    data = load_balance()
+    data[str(user_id)] = amount
+    save_balance(data)
+
+async def daily_bonus():
+    await client.wait_until_ready()
+    msk = pytz.timezone("Europe/Moscow")
+    while True:
+        now = datetime.now(msk)
+        seconds_until_midnight = ((24 - now.hour - 1) * 3600 +
+                                   (60 - now.minute - 1) * 60 +
+                                   (60 - now.second))
+        await asyncio.sleep(seconds_until_midnight)
+        data = load_balance()
+        for user_id in data:
+            data[user_id] += 100
+        save_balance(data)
+        await asyncio.sleep(60)
+
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"Бот запущен: {client.user}")
+    client.loop.create_task(daily_bonus())
+
+@tree.command(name="баланс", description="Посмотреть свой баланс")
+async def баланс(interaction: discord.Interaction):
+    bal = get_balance(interaction.user.id)
+    await interaction.response.send_message(f"💰 {interaction.user.name}, твой баланс: **{bal} руб.**")
+
+@tree.command(name="оир", description="Орёл или решка")
+@app_commands.describe(сторона="орёл или решка", ставка="Сумма ставки")
+async def оир(interaction: discord.Interaction, сторона: str, ставка: int):
+    if interaction.channel.name not in CASINO_CHANNELS:
+        await interaction.response.send_message("❌ Используй только в **#казик**!", ephemeral=True)
+        return
+    сторона = сторона.lower()
+    if сторона not in ["орёл", "орел", "решка"]:
+        await interaction.response.send_message("❌ Напиши **орёл** или **решка**!", ephemeral=True)
+        return
+    if ставка <= 0:
+        await interaction.response.send_message("❌ Ставка должна быть больше 0!", ephemeral=True)
+        return
+    bal = get_balance(interaction.user.id)
+    if ставка > bal:
+        await interaction.response.send_message(f"❌ Недостаточно денег! Твой баланс: **{bal} руб.**", ephemeral=True)
+        return
+    результат = random.choice(["орёл", "решка"])
+    if сторона == "орел":
+        сторона = "орёл"
+    if сторона == результат:
+        новый_баланс = bal + ставка
+        set_balance(interaction.user.id, новый_баланс)
+        await interaction.response.send_message(
+            f"🪙 Монета подброшена...\n"
+            f"Выпало **{результат}**!\n\n"
+            f"🎉 Удача на твоей стороне!\n"
+            f"✅ Ты выиграл **{ставка} руб.**\n"
+            f"💰 Твой баланс: **{новый_баланс} руб.**")
+    else:
+        новый_баланс = bal - ставка
+        set_balance(interaction.user.id, новый_баланс)
+        await interaction.response.send_message(
+            f"🪙 Монета подброшена...\n"
+            f"Выпало **{результат}**!\n\n"
+            f"😢 Не повезло!\n"
+            f"❌ Ты проиграл **{ставка} руб.**\n"
+            f"💰 Твой баланс: **{новый_баланс} руб.**")
+
+@tree.command(name="рул", description="Рулетка")
+@app_commands.describe(ставка="Сумма ставки")
+async def рул(interaction: discord.Interaction, ставка: int):
+    if interaction.channel.name not in CASINO_CHANNELS:
+        await interaction.response.send_message("❌ Используй только в **#казик**!", ephemeral=True)
+        return
+    if ставка <= 0:
+        await interaction.response.send_message("❌ Ставка должна быть больше 0!", ephemeral=True)
+        return
+    bal = get_balance(interaction.user.id)
+    if ставка > bal:
+        await interaction.response.send_message(f"❌ Недостаточно денег! Твой баланс: **{bal} руб.**", ephemeral=True)
+        return
+    победа = random.choice([True, False])
+    if победа:
+        новый_баланс = bal + ставка
+        set_balance(interaction.user.id, новый_баланс)
+        await interaction.response.send_message(
+            f"🎰 Рулетка крутится...\n\n"
+            f"🎉 ДЖЕКПОТ! Ты сорвал куш!\n"
+            f"✅ Ты выиграл **{ставка} руб.**\n"
+            f"💰 Твой баланс: **{новый_баланс} руб.**")
+    else:
+        новый_баланс = bal - ставка
+        set_balance(interaction.user.id, новый_баланс)
+        await interaction.response.send_message(
+            f"🎰 Рулетка крутится...\n\n"
+            f"💸 Рулетка не твоя сегодня...\n"
+            f"❌ Ты проиграл **{ставка} руб.**\n"
+            f"💰 Твой баланс: **{новый_баланс} руб.**")
+
+@tree.command(name="нак", description="Накрутить баланс участнику")
+@app_commands.describe(участник="Участник", сумма="Сумма")
+async def нак(interaction: discord.Interaction, участник: discord.Member, сумма: int):
+    роли = [r.name for r in interaction.user.roles]
+    if "Владелец Сервера" not in роли:
+        await interaction.response.send_message("❌ У тебя нет прав!", ephemeral=True)
+        return
+    bal = get_balance(участник.id)
+    новый_баланс = bal + сумма
+    set_balance(участник.id, новый_баланс)
+    await interaction.response.send_message(
+        f"✅ Готово! {участник.name} получил **{сумма} руб.**\n"
+        f"💰 Новый баланс: **{новый_баланс} руб.**")
+
+@tree.command(name="gemini", description="Задай вопрос Gemini")
+@app_commands.describe(вопрос="Твой вопрос")
+async def gemini(interaction: discord.Interaction, вопрос: str):
+    await interaction.response.defer()
+    response = model_flash.generate_content(вопрос)
+    ответ = response.text
+    if len(ответ) > 1900:
+        ответ = ответ[:1900] + "...(обрезано)"
+    await interaction.followup.send(f"**Вопрос:** {вопрос}\n\n**Gemini:** {ответ}")
+
+@tree.command(name="gemini_code", description="Gemini пишет качественный код")
+@app_commands.describe(задача="Что нужно написать")
+async def gemini_code(interaction: discord.Interaction, задача: str):
+    await interaction.response.defer()
+    промпт = f"Ты опытный программист. Напиши качественный чистый код с комментариями. Задача: {задача}"
+    response = model_flash.generate_content(промпт)
+    ответ = response.text
+    if len(ответ) > 1900:
+        ответ = ответ[:1900] + "...(обрезано)"
+    await interaction.followup.send(f"**Код для:** {задача}\n\n{ответ}")
+
+@tree.command(name="gemini_think", description="Думающий Gemini")
+@app_commands.describe(вопрос="Твой вопрос")
+async def gemini_think(interaction: discord.Interaction, вопрос: str):
+    await interaction.response.defer()
+    response = model_think.generate_content(вопрос)
+    ответ = response.text
+    if len(ответ) > 1900:
+        ответ = ответ[:1900] + "...(обрезано)"
+    await interaction.followup.send(f"**Вопрос:** {вопрос}\n\n**Gemini Think:** {ответ}")
+
+client.run(DISCORD_TOKEN)
