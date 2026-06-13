@@ -15,7 +15,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
 model_flash = genai.GenerativeModel("gemini-1.5-flash")
-model_think = genai.GenerativeModel("gemini-2.0-flash-thinking-exp")
+model_think = genai.GenerativeModel("gemini-1.5-pro")
 
 intents = discord.Intents.default()
 intents.members = True
@@ -276,3 +276,4 @@ async def gemini_think(interaction: discord.Interaction, вопрос: str):
 
 threading.Thread(target=run_web, daemon=True).start()
 client.run(DISCORD_TOKEN)
+bot-9.py
