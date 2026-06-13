@@ -4,12 +4,11 @@ import google.generativeai as genai
 import json
 import os
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import pytz
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
-
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -17,11 +16,41 @@ model_flash = genai.GenerativeModel("gemini-1.5-flash")
 model_think = genai.GenerativeModel("gemini-2.0-flash-thinking-exp")
 
 intents = discord.Intents.default()
+intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 BALANCE_FILE = "balance.json"
 CASINO_CHANNELS = ["казик", "казино", "лучшие-по-казику", "чемпионат-по-казику"]
+
+СТРАНЫ = [
+    ("Россия", ["Москва", "Санкт-Петербург", "Казань", "Новосибирск", "Екатеринбург", "Краснодар"]),
+    ("Украина", ["Киев", "Харьков", "Одесса", "Днепр"]),
+    ("Беларусь", ["Минск", "Гомель", "Брест"]),
+    ("Казахстан", ["Алматы", "Астана", "Шымкент"]),
+    ("Узбекистан", ["Ташкент", "Самарканд"]),
+    ("Азербайджан", ["Баку", "Гянджа"]),
+    ("Армения", ["Ереван", "Гюмри"]),
+    ("Грузия", ["Тбилиси", "Батуми"]),
+    ("Молдова", ["Кишинёв"]),
+    ("Кыргызстан", ["Бишкек"]),
+    ("Таджикистан", ["Душанбе"]),
+    ("Туркменистан", ["Ашхабад"]),
+    ("Израиль", ["Тель-Авив", "Иерусалим", "Хайфа"]),
+    ("Палестина", ["Газа", "Рамалла"]),
+    ("Афганистан", ["Кабул", "Кандагар"]),
+    ("КНДР", ["Пхеньян", "Вонсан"]),
+    ("Иран", ["Тегеран", "Исфахан"]),
+    ("США", ["Нью-Йорк", "Лос-Анджелес", "Чикаго", "Хьюстон"]),
+    ("Сирия", ["Дамаск", "Алеппо"]),
+    ("Ирак", ["Багдад", "Басра"]),
+    ("Остров Эпштейна", ["Остров Эпштейна"]),
+]
+
+УЛИЦЫ = ["ул. Ленина", "пр. Мира", "ул. Пушкина", "ул. Гагарина", "пр. Победы",
+          "ул. Советская", "ул. Садовая", "пр. Независимости", "ул. Центральная"]
+
+BAN_ROLES = ["Модератор", "Главный Модератор", "Создатель Сервера"]
 
 def load_balance():
     if os.path.exists(BALANCE_FILE):
@@ -63,11 +92,13 @@ async def on_ready():
     print(f"Бот запущен: {client.user}")
     client.loop.create_task(daily_bonus())
 
+# /баланс
 @tree.command(name="баланс", description="Посмотреть свой баланс")
 async def баланс(interaction: discord.Interaction):
     bal = get_balance(interaction.user.id)
     await interaction.response.send_message(f"💰 {interaction.user.name}, твой баланс: **{bal} руб.**")
 
+# /оир
 @tree.command(name="оир", description="Орёл или решка")
 @app_commands.describe(сторона="орёл или решка", ставка="Сумма ставки")
 async def оир(interaction: discord.Interaction, сторона: str, ставка: int):
@@ -107,6 +138,7 @@ async def оир(interaction: discord.Interaction, сторона: str, став
             f"❌ Ты проиграл **{ставка} руб.**\n"
             f"💰 Твой баланс: **{новый_баланс} руб.**")
 
+# /рул
 @tree.command(name="рул", description="Рулетка")
 @app_commands.describe(ставка="Сумма ставки")
 async def рул(interaction: discord.Interaction, ставка: int):
@@ -138,6 +170,7 @@ async def рул(interaction: discord.Interaction, ставка: int):
             f"❌ Ты проиграл **{ставка} руб.**\n"
             f"💰 Твой баланс: **{новый_баланс} руб.**")
 
+# /нак
 @tree.command(name="нак", description="Накрутить баланс участнику")
 @app_commands.describe(участник="Участник", сумма="Сумма")
 async def нак(interaction: discord.Interaction, участник: discord.Member, сумма: int):
@@ -152,6 +185,47 @@ async def нак(interaction: discord.Interaction, участник: discord.Mem
         f"✅ Готово! {участник.name} получил **{сумма} руб.**\n"
         f"💰 Новый баланс: **{новый_баланс} руб.**")
 
+# /ip
+@tree.command(name="ip", description="Узнать 'IP' участника")
+@app_commands.describe(участник="Участник")
+async def ip(interaction: discord.Interaction, участник: discord.Member):
+    if random.random() < 0.67:
+        страна, города = ("Россия", ["Москва", "Санкт-Петербург", "Казань", "Новосибирск", "Екатеринбург", "Краснодар"])
+    else:
+        страна, города = random.choice(СТРАНЫ[1:])
+    город = random.choice(города)
+    айпи = f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(0,255)}"
+    улица = random.choice(УЛИЦЫ)
+    дом = f"{random.randint(1,99)}{random.choice(['', 'а', 'б', 'в'])}"
+    подъезд = random.randint(1, 10)
+    квартира = random.randint(1, 99)
+    await interaction.response.send_message(
+        f"🔍 **Пробив {участник.name}**\n\n"
+        f"🌐 **IP:** `{айпи}`\n"
+        f"🌍 **Страна:** {страна}\n"
+        f"🏙️ **Город:** {город}\n"
+        f"📍 **Адрес:** {улица}, д. {дом}\n"
+        f"🚪 **Подъезд:** {подъезд}\n"
+        f"🏠 **Квартира:** {квартира}")
+
+# /fake_ban
+@tree.command(name="fake_ban", description="Забанить участника на 67 секунд")
+@app_commands.describe(участник="Участник")
+async def fake_ban(interaction: discord.Interaction, участник: discord.Member):
+    роли = [r.name for r in interaction.user.roles]
+    if not any(r in роли for r in BAN_ROLES):
+        await interaction.response.send_message("❌ У тебя нет прав!", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        f"🔨 {участник.mention} **вас забанили на 67 секунд во всех чатах!**")
+    try:
+        await участник.timeout(discord.utils.utcnow() + timedelta(seconds=67))
+    except:
+        pass
+    await asyncio.sleep(67)
+    await interaction.channel.send(f"✅ {участник.mention} бан снят!")
+
+# /gemini
 @tree.command(name="gemini", description="Задай вопрос Gemini")
 @app_commands.describe(вопрос="Твой вопрос")
 async def gemini(interaction: discord.Interaction, вопрос: str):
@@ -162,6 +236,7 @@ async def gemini(interaction: discord.Interaction, вопрос: str):
         ответ = ответ[:1900] + "...(обрезано)"
     await interaction.followup.send(f"**Вопрос:** {вопрос}\n\n**Gemini:** {ответ}")
 
+# /gemini_code
 @tree.command(name="gemini_code", description="Gemini пишет качественный код")
 @app_commands.describe(задача="Что нужно написать")
 async def gemini_code(interaction: discord.Interaction, задача: str):
@@ -173,6 +248,7 @@ async def gemini_code(interaction: discord.Interaction, задача: str):
         ответ = ответ[:1900] + "...(обрезано)"
     await interaction.followup.send(f"**Код для:** {задача}\n\n{ответ}")
 
+# /gemini_think
 @tree.command(name="gemini_think", description="Думающий Gemini")
 @app_commands.describe(вопрос="Твой вопрос")
 async def gemini_think(interaction: discord.Interaction, вопрос: str):
