@@ -7,6 +7,8 @@ import random
 from datetime import datetime, timedelta
 import asyncio
 import pytz
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -86,19 +88,30 @@ async def daily_bonus():
         save_balance(data)
         await asyncio.sleep(60)
 
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+    def log_message(self, format, *args):
+        pass
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
+
 @client.event
 async def on_ready():
     await tree.sync()
     print(f"Бот запущен: {client.user}")
     client.loop.create_task(daily_bonus())
 
-# /баланс
 @tree.command(name="баланс", description="Посмотреть свой баланс")
 async def баланс(interaction: discord.Interaction):
     bal = get_balance(interaction.user.id)
     await interaction.response.send_message(f"💰 {interaction.user.name}, твой баланс: **{bal} руб.**")
 
-# /оир
 @tree.command(name="оир", description="Орёл или решка")
 @app_commands.describe(сторона="орёл или решка", ставка="Сумма ставки")
 async def оир(interaction: discord.Interaction, сторона: str, ставка: int):
@@ -123,8 +136,7 @@ async def оир(interaction: discord.Interaction, сторона: str, став
         новый_баланс = bal + ставка
         set_balance(interaction.user.id, новый_баланс)
         await interaction.response.send_message(
-            f"🪙 Монета подброшена...\n"
-            f"Выпало **{результат}**!\n\n"
+            f"🪙 Монета подброшена...\nВыпало **{результат}**!\n\n"
             f"🎉 Удача на твоей стороне!\n"
             f"✅ Ты выиграл **{ставка} руб.**\n"
             f"💰 Твой баланс: **{новый_баланс} руб.**")
@@ -132,13 +144,11 @@ async def оир(interaction: discord.Interaction, сторона: str, став
         новый_баланс = bal - ставка
         set_balance(interaction.user.id, новый_баланс)
         await interaction.response.send_message(
-            f"🪙 Монета подброшена...\n"
-            f"Выпало **{результат}**!\n\n"
+            f"🪙 Монета подброшена...\nВыпало **{результат}**!\n\n"
             f"😢 Не повезло!\n"
             f"❌ Ты проиграл **{ставка} руб.**\n"
             f"💰 Твой баланс: **{новый_баланс} руб.**")
 
-# /рул
 @tree.command(name="рул", description="Рулетка")
 @app_commands.describe(ставка="Сумма ставки")
 async def рул(interaction: discord.Interaction, ставка: int):
@@ -170,7 +180,6 @@ async def рул(interaction: discord.Interaction, ставка: int):
             f"❌ Ты проиграл **{ставка} руб.**\n"
             f"💰 Твой баланс: **{новый_баланс} руб.**")
 
-# /нак
 @tree.command(name="нак", description="Накрутить баланс участнику")
 @app_commands.describe(участник="Участник", сумма="Сумма")
 async def нак(interaction: discord.Interaction, участник: discord.Member, сумма: int):
@@ -185,7 +194,6 @@ async def нак(interaction: discord.Interaction, участник: discord.Mem
         f"✅ Готово! {участник.name} получил **{сумма} руб.**\n"
         f"💰 Новый баланс: **{новый_баланс} руб.**")
 
-# /ip
 @tree.command(name="ip", description="Узнать 'IP' участника")
 @app_commands.describe(участник="Участник")
 async def ip(interaction: discord.Interaction, участник: discord.Member):
@@ -208,7 +216,6 @@ async def ip(interaction: discord.Interaction, участник: discord.Member)
         f"🚪 **Подъезд:** {подъезд}\n"
         f"🏠 **Квартира:** {квартира}")
 
-# /fake_ban
 @tree.command(name="fake_ban", description="Забанить участника на 67 секунд")
 @app_commands.describe(участник="Участник")
 async def fake_ban(interaction: discord.Interaction, участник: discord.Member):
@@ -225,7 +232,6 @@ async def fake_ban(interaction: discord.Interaction, участник: discord.M
     await asyncio.sleep(67)
     await interaction.channel.send(f"✅ {участник.mention} бан снят!")
 
-# /gemini
 @tree.command(name="gemini", description="Задай вопрос Gemini")
 @app_commands.describe(вопрос="Твой вопрос")
 async def gemini(interaction: discord.Interaction, вопрос: str):
@@ -236,7 +242,6 @@ async def gemini(interaction: discord.Interaction, вопрос: str):
         ответ = ответ[:1900] + "...(обрезано)"
     await interaction.followup.send(f"**Вопрос:** {вопрос}\n\n**Gemini:** {ответ}")
 
-# /gemini_code
 @tree.command(name="gemini_code", description="Gemini пишет качественный код")
 @app_commands.describe(задача="Что нужно написать")
 async def gemini_code(interaction: discord.Interaction, задача: str):
@@ -248,7 +253,6 @@ async def gemini_code(interaction: discord.Interaction, задача: str):
         ответ = ответ[:1900] + "...(обрезано)"
     await interaction.followup.send(f"**Код для:** {задача}\n\n{ответ}")
 
-# /gemini_think
 @tree.command(name="gemini_think", description="Думающий Gemini")
 @app_commands.describe(вопрос="Твой вопрос")
 async def gemini_think(interaction: discord.Interaction, вопрос: str):
@@ -258,5 +262,8 @@ async def gemini_think(interaction: discord.Interaction, вопрос: str):
     if len(ответ) > 1900:
         ответ = ответ[:1900] + "...(обрезано)"
     await interaction.followup.send(f"**Вопрос:** {вопрос}\n\n**Gemini Think:** {ответ}")
+
+# Запуск веб-сервера в отдельном потоке
+threading.Thread(target=run_web, daemon=True).start()
 
 client.run(DISCORD_TOKEN)
