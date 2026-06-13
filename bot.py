@@ -97,7 +97,7 @@ async def ping_loop():
         for guild in client.guilds:
             channel = discord.utils.get(guild.text_channels, name=PING_CHANNEL)
             if channel:
-                await channel.send(f"🟢 <@{PING_USER_ID}> я онлайн!")
+                await channel.send("🟢 я онлайн!")
         await asyncio.sleep(300)
 
 class HealthHandler(BaseHTTPRequestHandler):
