@@ -24,8 +24,6 @@ tree = app_commands.CommandTree(client)
 
 BALANCE_FILE = "balance.json"
 CASINO_CHANNELS = ["казик", "казино", "лучшие-по-казику", "чемпионат-по-казику"]
-PING_CHANNEL = "пинг-бота"
-PING_USER_ID = 1514283050614128921  # ID Lekklir Gamer
 
 СТРАНЫ = [
     ("Россия", ["Москва", "Санкт-Петербург", "Казань", "Новосибирск", "Екатеринбург", "Краснодар"]),
@@ -91,15 +89,6 @@ async def daily_bonus():
         save_balance(data)
         await asyncio.sleep(60)
 
-async def ping_loop():
-    await client.wait_until_ready()
-    while True:
-        for guild in client.guilds:
-            channel = discord.utils.get(guild.text_channels, name=PING_CHANNEL)
-            if channel:
-                await channel.send("🟢 я онлайн!")
-        await asyncio.sleep(300)
-
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -118,7 +107,6 @@ async def on_ready():
     await tree.sync()
     print(f"Бот запущен: {client.user}")
     client.loop.create_task(daily_bonus())
-    client.loop.create_task(ping_loop())
 
 @tree.command(name="баланс", description="Посмотреть свой баланс")
 async def баланс(interaction: discord.Interaction):
