@@ -86,6 +86,15 @@ def set_balance(user_id, amount):
     data[str(user_id)] = amount
     save_balance(data)
 
+def has_role(member, role_name):
+    return any(r.name == role_name for r in member.roles)
+
+def get_role_index(member):
+    for i in range(len(SHOP_ROLES) - 1, -1, -1):
+        if has_role(member, SHOP_ROLES[i][1]):
+            return i
+    return -1
+
 async def daily_bonus():
     await client.wait_until_ready()
     msk = pytz.timezone("Europe/Moscow")
@@ -120,14 +129,37 @@ async def on_ready():
     print(f"Бот запущен: {client.user}")
     client.loop.create_task(daily_bonus())
 
-# Магазин — главное меню
+# Кнопка выйти
+class ExitView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="◀️ Назад", style=discord.ButtonStyle.secondary)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        bal = get_balance(interaction.user.id)
+        await interaction.response.edit_message(
+            content=f"🏪 **Магаз**\nТвой баланс: **{bal} ликкеров**\n\nЧто хочешь купить?",
+            view=ShopMainView())
+
+    @discord.ui.button(label="🚪 Выйти", style=discord.ButtonStyle.danger)
+    async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="👋 Вы закрыли магазин!", view=None)
+        await asyncio.sleep(3)
+        try:
+            await interaction.delete_original_response()
+        except:
+            pass
+
+# Главное меню
 class ShopMainView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
 
     @discord.ui.button(label="🎭 Роли", style=discord.ButtonStyle.primary)
     async def roles_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="🎭 **Магазин ролей**\nВыбери роль:", view=ShopRolesView(0))
+        await interaction.response.edit_message(
+            content="🎭 **Магазин ролей**\nВыбери роль:",
+            view=ShopRolesView(0, interaction.user))
 
     @discord.ui.button(label="🔓 Команды", style=discord.ButtonStyle.secondary)
     async def commands_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -137,58 +169,73 @@ class ShopMainView(discord.ui.View):
 
     @discord.ui.button(label="🚪 Выйти", style=discord.ButtonStyle.danger)
     async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="👋 Вы вышли из магазина!", view=None)
+        await interaction.response.edit_message(content="👋 Вы закрыли магазин!", view=None)
+        await asyncio.sleep(3)
+        try:
+            await interaction.delete_original_response()
+        except:
+            pass
 
-class ExitView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="🚪 Выйти", style=discord.ButtonStyle.danger)
-    async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="👋 Вы вышли из магазина!", view=None)
-
-    @discord.ui.button(label="◀️ Назад", style=discord.ButtonStyle.secondary)
-    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="🏪 **Магаз**\nЧто хочешь купить?", view=ShopMainView())
-
+# Страница ролей
 class ShopRolesView(discord.ui.View):
-    def __init__(self, page):
+    def __init__(self, page, member):
         super().__init__(timeout=60)
         self.page = page
-        # 6 ролей на страницу по 2 в строку
+        self.member = member
+        current_index = get_role_index(member)
         start = page * 6
         end = min(start + 6, len(SHOP_ROLES))
         for i in range(start, end):
             price, name, emoji = SHOP_ROLES[i]
-            self.add_item(RoleButton(price, name, emoji))
+            owned = has_role(member, name)
+            locked = i > current_index + 1
+            self.add_item(RoleButton(price, name, emoji, owned, locked, i))
         if end < len(SHOP_ROLES):
-            self.add_item(NextPageButton(page + 1))
+            self.add_item(NextPageButton(page + 1, member))
         if page > 0:
-            self.add_item(PrevPageButton(page - 1))
+            self.add_item(PrevPageButton(page - 1, member))
+        self.add_item(BackToMainButton(member))
         self.add_item(ExitShopButton())
 
 class RoleButton(discord.ui.Button):
-    def __init__(self, price, name, emoji):
-        super().__init__(label=f"{emoji} {price} - {name}", style=discord.ButtonStyle.success, row=None)
+    def __init__(self, price, name, emoji, owned, locked, index):
+        if owned:
+            label = f"✅ {name}"
+            style = discord.ButtonStyle.success
+            disabled = True
+        elif locked:
+            label = f"🔒 {price} - {name}"
+            style = discord.ButtonStyle.secondary
+            disabled = True
+        else:
+            label = f"{emoji} {price} - {name}"
+            style = discord.ButtonStyle.primary
+            disabled = False
+        super().__init__(label=label, style=style, disabled=disabled)
         self.price = price
         self.name = name
         self.emoji_icon = emoji
+        self.index = index
 
     async def callback(self, interaction: discord.Interaction):
-        view = ConfirmBuyView(self.price, self.name, self.emoji_icon)
+        view = ConfirmBuyView(self.price, self.name, self.emoji_icon, self.index)
         await interaction.response.edit_message(
             content=f"❓ Вы уверены что хотите купить роль **{self.emoji_icon} {self.name}** за **{self.price} ликкеров**?",
             view=view)
 
 class ConfirmBuyView(discord.ui.View):
-    def __init__(self, price, name, emoji):
+    def __init__(self, price, name, emoji, index):
         super().__init__(timeout=30)
         self.price = price
         self.name = name
         self.emoji = emoji
+        self.index = index
 
     @discord.ui.button(label="✅ Да", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if has_role(interaction.user, self.name):
+            await interaction.response.edit_message(content="❌ У тебя уже есть эта роль!", view=ExitView())
+            return
         bal = get_balance(interaction.user.id)
         if bal < self.price:
             await interaction.response.edit_message(
@@ -205,7 +252,7 @@ class ConfirmBuyView(discord.ui.View):
         try:
             await interaction.user.add_roles(role)
         except:
-            await interaction.response.edit_message(content="❌ Не удалось выдать роль!", view=ExitView())
+            await interaction.response.edit_message(content="❌ Не удалось выдать роль! Проверь иерархию ролей.", view=ExitView())
             return
         set_balance(interaction.user.id, bal - self.price)
         await interaction.response.edit_message(
@@ -216,34 +263,57 @@ class ConfirmBuyView(discord.ui.View):
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
             content="🚫 Покупка отменена!",
-            view=ShopRolesView(0))
+            view=ShopRolesView(0, interaction.user))
 
     @discord.ui.button(label="🚪 Выйти", style=discord.ButtonStyle.secondary)
     async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="👋 Вы вышли из магазина!", view=None)
+        await interaction.response.edit_message(content="👋 Вы закрыли магазин!", view=None)
+        await asyncio.sleep(3)
+        try:
+            await interaction.delete_original_response()
+        except:
+            pass
 
 class NextPageButton(discord.ui.Button):
-    def __init__(self, page):
+    def __init__(self, page, member):
         super().__init__(label="▶️ Далее", style=discord.ButtonStyle.primary)
         self.page = page
+        self.member = member
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(view=ShopRolesView(self.page))
+        await interaction.response.edit_message(view=ShopRolesView(self.page, interaction.user))
 
 class PrevPageButton(discord.ui.Button):
-    def __init__(self, page):
+    def __init__(self, page, member):
         super().__init__(label="◀️ Назад", style=discord.ButtonStyle.secondary)
         self.page = page
+        self.member = member
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(view=ShopRolesView(self.page))
+        await interaction.response.edit_message(view=ShopRolesView(self.page, interaction.user))
+
+class BackToMainButton(discord.ui.Button):
+    def __init__(self, member):
+        super().__init__(label="🏪 В меню", style=discord.ButtonStyle.secondary)
+        self.member = member
+
+    async def callback(self, interaction: discord.Interaction):
+        bal = get_balance(interaction.user.id)
+        await interaction.response.edit_message(
+            content=f"🏪 **Магаз**\nТвой баланс: **{bal} ликкеров**\n\nЧто хочешь купить?",
+            view=ShopMainView())
 
 class ExitShopButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="🚪 Выйти", style=discord.ButtonStyle.danger)
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(content="👋 Вы вышли из магазина!", view=None)
+        await interaction.response.edit_message(content="👋 Вы закрыли магазин!", view=None)
+        await asyncio.sleep(3)
+        try:
+            await interaction.delete_original_response()
+        except:
+            pass
 
 # Команды
 @tree.command(name="баланс", description="Посмотреть свой баланс")
@@ -333,10 +403,30 @@ async def нак(interaction: discord.Interaction, участник: discord.Mem
         f"✅ Готово! {участник.name} получил **{сумма} ликкеров**\n"
         f"💰 Новый баланс: **{новый_баланс} ликкеров**")
 
+@tree.command(name="пер", description="Перевести ликкеры участнику")
+@app_commands.describe(участник="Участник", сумма="Сумма перевода")
+async def пер(interaction: discord.Interaction, участник: discord.Member, сумма: int):
+    if участник.id == interaction.user.id:
+        await interaction.response.send_message("❌ Нельзя переводить самому себе!", ephemeral=True)
+        return
+    if сумма <= 0:
+        await interaction.response.send_message("❌ Сумма должна быть больше 0!", ephemeral=True)
+        return
+    bal = get_balance(interaction.user.id)
+    if сумма > bal:
+        await interaction.response.send_message(f"❌ Недостаточно ликкеров! Твой баланс: **{bal}**", ephemeral=True)
+        return
+    set_balance(interaction.user.id, bal - сумма)
+    set_balance(участник.id, get_balance(участник.id) + сумма)
+    await interaction.response.send_message(
+        f"💸 {interaction.user.name} перевёл **{сумма} ликкеров** → {участник.mention}\n"
+        f"💰 Твой баланс: **{bal - сумма} ликкеров**")
+
 @tree.command(name="ip", description="Узнать 'IP' участника")
-@app_commands.describe(участник="Участник")
-async def ip(interaction: discord.Interaction, участник: discord.Member):
+@app_commands.describe(участник="Участник (необязательно)")
+async def ip(interaction: discord.Interaction, участник: discord.Member = None):
     await interaction.response.defer()
+    цель = участник if участник else interaction.user
     страна, города = random.choice(СТРАНЫ)
     город = random.choice(города)
     айпи = f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(0,255)}"
@@ -345,7 +435,7 @@ async def ip(interaction: discord.Interaction, участник: discord.Member)
     подъезд = random.randint(1, 10)
     квартира = random.randint(1, 99)
     await interaction.followup.send(
-        f"🔍 **Пробив {участник.name}**\n\n"
+        f"🔍 **Пробив {цель.name}**\n\n"
         f"🌐 **IP:** `{айпи}`\n"
         f"🌍 **Страна:** {страна}\n"
         f"🏙️ **Город:** {город}\n"
