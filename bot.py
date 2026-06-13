@@ -1,6 +1,5 @@
 import discord
 from discord import app_commands
-import google.generativeai as genai
 import json
 import os
 import random
@@ -11,11 +10,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-genai.configure(api_key=GEMINI_API_KEY)
-model_flash = genai.GenerativeModel("gemini-1.5-flash")
-model_think = genai.GenerativeModel("gemini-1.5-pro")
 
 intents = discord.Intents.default()
 intents.members = True
@@ -54,6 +48,24 @@ CASINO_CHANNELS = ["казик", "казино", "лучшие-по-казику
 
 BAN_ROLES = ["Модератор", "Главный Модератор", "Создатель Сервера"]
 SEND_ROLES = ["Главный Модератор", "Владелец Сервера"]
+
+SHOP_ROLES = [
+    (500, "Нищеброд", "🥉"),
+    (1000, "Малой с карманными", "🥈"),
+    (5000, "Уже не так плохо", "🥇"),
+    (10000, "Начинающий донатер", "💎"),
+    (15000, "Казик мой дом", "🎰"),
+    (20000, "Рофлан", "🃏"),
+    (30000, "Сынок папы", "👑"),
+    (40000, "Богатенький Буратино", "💰"),
+    (50000, "Топ 1 сервера (нет)", "🏆"),
+    (75000, "Читер или нет?", "⚡"),
+    (100000, "Мама я в топе", "🌟"),
+    (250000, "Это вообще реально?", "💫"),
+    (500000, "Продал почку", "🔥"),
+    (750000, "Без комментариев", "⚜️"),
+    (1000000, "Бог Казика", "👾"),
+]
 
 def load_balance():
     if os.path.exists(BALANCE_FILE):
@@ -108,10 +120,136 @@ async def on_ready():
     print(f"Бот запущен: {client.user}")
     client.loop.create_task(daily_bonus())
 
+# Магазин — главное меню
+class ShopMainView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="🎭 Роли", style=discord.ButtonStyle.primary)
+    async def roles_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="🎭 **Магазин ролей**\nВыбери роль:", view=ShopRolesView(0))
+
+    @discord.ui.button(label="🔓 Команды", style=discord.ButtonStyle.secondary)
+    async def commands_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="🔓 **Магазин команд**\nМагазин команд скоро откроется! 🔜",
+            view=ExitView())
+
+    @discord.ui.button(label="🚪 Выйти", style=discord.ButtonStyle.danger)
+    async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="👋 Вы вышли из магазина!", view=None)
+
+class ExitView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="🚪 Выйти", style=discord.ButtonStyle.danger)
+    async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="👋 Вы вышли из магазина!", view=None)
+
+    @discord.ui.button(label="◀️ Назад", style=discord.ButtonStyle.secondary)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="🏪 **Магаз**\nЧто хочешь купить?", view=ShopMainView())
+
+class ShopRolesView(discord.ui.View):
+    def __init__(self, page):
+        super().__init__(timeout=60)
+        self.page = page
+        # 6 ролей на страницу по 2 в строку
+        start = page * 6
+        end = min(start + 6, len(SHOP_ROLES))
+        for i in range(start, end):
+            price, name, emoji = SHOP_ROLES[i]
+            self.add_item(RoleButton(price, name, emoji))
+        if end < len(SHOP_ROLES):
+            self.add_item(NextPageButton(page + 1))
+        if page > 0:
+            self.add_item(PrevPageButton(page - 1))
+        self.add_item(ExitShopButton())
+
+class RoleButton(discord.ui.Button):
+    def __init__(self, price, name, emoji):
+        super().__init__(label=f"{emoji} {price} - {name}", style=discord.ButtonStyle.success, row=None)
+        self.price = price
+        self.name = name
+        self.emoji_icon = emoji
+
+    async def callback(self, interaction: discord.Interaction):
+        view = ConfirmBuyView(self.price, self.name, self.emoji_icon)
+        await interaction.response.edit_message(
+            content=f"❓ Вы уверены что хотите купить роль **{self.emoji_icon} {self.name}** за **{self.price} ликкеров**?",
+            view=view)
+
+class ConfirmBuyView(discord.ui.View):
+    def __init__(self, price, name, emoji):
+        super().__init__(timeout=30)
+        self.price = price
+        self.name = name
+        self.emoji = emoji
+
+    @discord.ui.button(label="✅ Да", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        bal = get_balance(interaction.user.id)
+        if bal < self.price:
+            await interaction.response.edit_message(
+                content=f"❌ Недостаточно ликкеров! У тебя **{bal}**, нужно **{self.price}**",
+                view=ExitView())
+            return
+        role = discord.utils.get(interaction.guild.roles, name=self.name)
+        if not role:
+            try:
+                role = await interaction.guild.create_role(name=self.name)
+            except:
+                await interaction.response.edit_message(content="❌ Не удалось создать роль!", view=ExitView())
+                return
+        try:
+            await interaction.user.add_roles(role)
+        except:
+            await interaction.response.edit_message(content="❌ Не удалось выдать роль!", view=ExitView())
+            return
+        set_balance(interaction.user.id, bal - self.price)
+        await interaction.response.edit_message(
+            content=f"✅ Роль **{self.emoji} {self.name}** получена!\n💰 Остаток: **{bal - self.price} ликкеров**",
+            view=ExitView())
+
+    @discord.ui.button(label="❌ Нет", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="🚫 Покупка отменена!",
+            view=ShopRolesView(0))
+
+    @discord.ui.button(label="🚪 Выйти", style=discord.ButtonStyle.secondary)
+    async def exit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="👋 Вы вышли из магазина!", view=None)
+
+class NextPageButton(discord.ui.Button):
+    def __init__(self, page):
+        super().__init__(label="▶️ Далее", style=discord.ButtonStyle.primary)
+        self.page = page
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(view=ShopRolesView(self.page))
+
+class PrevPageButton(discord.ui.Button):
+    def __init__(self, page):
+        super().__init__(label="◀️ Назад", style=discord.ButtonStyle.secondary)
+        self.page = page
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(view=ShopRolesView(self.page))
+
+class ExitShopButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="🚪 Выйти", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(content="👋 Вы вышли из магазина!", view=None)
+
+# Команды
 @tree.command(name="баланс", description="Посмотреть свой баланс")
 async def баланс(interaction: discord.Interaction):
     bal = get_balance(interaction.user.id)
-    await interaction.response.send_message(f"💰 {interaction.user.name}, твой баланс: **{bal} руб.**")
+    await interaction.response.send_message(f"💰 {interaction.user.name}, твой баланс: **{bal} ликкеров**", ephemeral=True)
 
 СТОРОНА_ВЫБОР = [
     app_commands.Choice(name="Орёл", value="орёл"),
@@ -130,7 +268,7 @@ async def оир(interaction: discord.Interaction, сторона: app_commands.
         return
     bal = get_balance(interaction.user.id)
     if ставка > bal:
-        await interaction.response.send_message(f"❌ Недостаточно денег! Твой баланс: **{bal} руб.**", ephemeral=True)
+        await interaction.response.send_message(f"❌ Недостаточно ликкеров! Твой баланс: **{bal}**", ephemeral=True)
         return
     результат = random.choice(["орёл", "решка"])
     if сторона.value == результат:
@@ -139,16 +277,16 @@ async def оир(interaction: discord.Interaction, сторона: app_commands.
         await interaction.response.send_message(
             f"🪙 Монета подброшена...\nВыпало **{результат}**!\n\n"
             f"🎉 Удача на твоей стороне!\n"
-            f"✅ Ты выиграл **{ставка} руб.**\n"
-            f"💰 Твой баланс: **{новый_баланс} руб.**")
+            f"✅ Ты выиграл **{ставка} ликкеров**\n"
+            f"💰 Твой баланс: **{новый_баланс} ликкеров**")
     else:
         новый_баланс = bal - ставка
         set_balance(interaction.user.id, новый_баланс)
         await interaction.response.send_message(
             f"🪙 Монета подброшена...\nВыпало **{результат}**!\n\n"
             f"😢 Не повезло!\n"
-            f"❌ Ты проиграл **{ставка} руб.**\n"
-            f"💰 Твой баланс: **{новый_баланс} руб.**")
+            f"❌ Ты проиграл **{ставка} ликкеров**\n"
+            f"💰 Твой баланс: **{новый_баланс} ликкеров**")
 
 @tree.command(name="рул", description="Рулетка")
 @app_commands.describe(ставка="Сумма ставки")
@@ -161,7 +299,7 @@ async def рул(interaction: discord.Interaction, ставка: int):
         return
     bal = get_balance(interaction.user.id)
     if ставка > bal:
-        await interaction.response.send_message(f"❌ Недостаточно денег! Твой баланс: **{bal} руб.**", ephemeral=True)
+        await interaction.response.send_message(f"❌ Недостаточно ликкеров! Твой баланс: **{bal}**", ephemeral=True)
         return
     победа = random.choice([True, False])
     if победа:
@@ -170,16 +308,16 @@ async def рул(interaction: discord.Interaction, ставка: int):
         await interaction.response.send_message(
             f"🎰 Рулетка крутится...\n\n"
             f"🎉 ДЖЕКПОТ! Ты сорвал куш!\n"
-            f"✅ Ты выиграл **{ставка} руб.**\n"
-            f"💰 Твой баланс: **{новый_баланс} руб.**")
+            f"✅ Ты выиграл **{ставка} ликкеров**\n"
+            f"💰 Твой баланс: **{новый_баланс} ликкеров**")
     else:
         новый_баланс = bal - ставка
         set_balance(interaction.user.id, новый_баланс)
         await interaction.response.send_message(
             f"🎰 Рулетка крутится...\n\n"
             f"💸 Рулетка не твоя сегодня...\n"
-            f"❌ Ты проиграл **{ставка} руб.**\n"
-            f"💰 Твой баланс: **{новый_баланс} руб.**")
+            f"❌ Ты проиграл **{ставка} ликкеров**\n"
+            f"💰 Твой баланс: **{новый_баланс} ликкеров**")
 
 @tree.command(name="нак", description="Накрутить баланс участнику")
 @app_commands.describe(участник="Участник", сумма="Сумма")
@@ -192,8 +330,8 @@ async def нак(interaction: discord.Interaction, участник: discord.Mem
     новый_баланс = bal + сумма
     set_balance(участник.id, новый_баланс)
     await interaction.response.send_message(
-        f"✅ Готово! {участник.name} получил **{сумма} руб.**\n"
-        f"💰 Новый баланс: **{новый_баланс} руб.**")
+        f"✅ Готово! {участник.name} получил **{сумма} ликкеров**\n"
+        f"💰 Новый баланс: **{новый_баланс} ликкеров**")
 
 @tree.command(name="ip", description="Узнать 'IP' участника")
 @app_commands.describe(участник="Участник")
@@ -243,37 +381,13 @@ async def отправить(interaction: discord.Interaction, участник:
         f"✈️ {участник.mention} **отправлен в {страна_норм}!**\n"
         f"🧳 Счастливого пути!")
 
-@tree.command(name="gemini", description="Задай вопрос Gemini")
-@app_commands.describe(вопрос="Твой вопрос")
-async def gemini(interaction: discord.Interaction, вопрос: str):
-    await interaction.response.defer()
-    response = model_flash.generate_content(вопрос)
-    ответ = response.text
-    if len(ответ) > 1900:
-        ответ = ответ[:1900] + "...(обрезано)"
-    await interaction.followup.send(f"**Вопрос:** {вопрос}\n\n**Gemini:** {ответ}")
-
-@tree.command(name="gemini_code", description="Gemini пишет качественный код")
-@app_commands.describe(задача="Что нужно написать")
-async def gemini_code(interaction: discord.Interaction, задача: str):
-    await interaction.response.defer()
-    промпт = f"Ты опытный программист. Напиши качественный чистый код с комментариями. Задача: {задача}"
-    response = model_flash.generate_content(промпт)
-    ответ = response.text
-    if len(ответ) > 1900:
-        ответ = ответ[:1900] + "...(обрезано)"
-    await interaction.followup.send(f"**Код для:** {задача}\n\n{ответ}")
-
-@tree.command(name="gemini_think", description="Думающий Gemini")
-@app_commands.describe(вопрос="Твой вопрос")
-async def gemini_think(interaction: discord.Interaction, вопрос: str):
-    await interaction.response.defer()
-    response = model_think.generate_content(вопрос)
-    ответ = response.text
-    if len(ответ) > 1900:
-        ответ = ответ[:1900] + "...(обрезано)"
-    await interaction.followup.send(f"**Вопрос:** {вопрос}\n\n**Gemini Think:** {ответ}")
+@tree.command(name="магазин", description="Открыть магазин")
+async def магазин(interaction: discord.Interaction):
+    bal = get_balance(interaction.user.id)
+    await interaction.response.send_message(
+        f"🏪 **Магаз**\nТвой баланс: **{bal} ликкеров**\n\nЧто хочешь купить?",
+        view=ShopMainView(),
+        ephemeral=True)
 
 threading.Thread(target=run_web, daemon=True).start()
 client.run(DISCORD_TOKEN)
-bot-9.py
